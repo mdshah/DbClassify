@@ -1,4 +1,5 @@
 import java.util.ArrayList;
+import java.util.HashSet;
 
 /**
  * @author Manushi Shah
@@ -11,6 +12,7 @@ public class Node {
 	private String name;
 	ArrayList<Node> children;
 	private ArrayList<String> probes;
+	private ArrayList<ArrayList<String>> topDocs;
 	
 	public Node(double spec, int cov, String name) {
 		this.setSpec(spec);
@@ -18,6 +20,7 @@ public class Node {
 		this.setName(name);
 		this.children = new ArrayList<Node>();
 		this.probes = new ArrayList<String>();
+		this.topDocs = new ArrayList<ArrayList<String>>();
 	}
 
 	public double getSpec() {
@@ -54,5 +57,13 @@ public class Node {
 	
 	public ArrayList<String> getProbe() {
 		return probes;
+	}
+	
+	public void addTopDocs(ArrayList<String> urls) {
+			topDocs.add(urls);
+	}
+	
+	public ArrayList<ArrayList<String>> getTopDocs() {
+		return topDocs;
 	}
 }

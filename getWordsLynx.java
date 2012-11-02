@@ -6,7 +6,7 @@ import java.util.TreeSet;
 
 public class getWordsLynx {
 
-    public static Set runLynx(String url) {
+    public static Set<String> runLynx(String url) {
 
         int buffersize = 40000;
         StringBuffer buffer = new StringBuffer(buffersize);
@@ -35,6 +35,7 @@ public class getWordsLynx {
         if (end == -1) {
             end = buffer.length();
         }
+        
         // Remove everything inside [   ] and do not write more than two consecutive spaces
         boolean recording = true;
         boolean wrotespace = false;
@@ -67,7 +68,8 @@ public class getWordsLynx {
                 }
             }
         }
-        Set document = new TreeSet();
+        
+        Set<String> document = new TreeSet<String>();
         StringTokenizer st = new StringTokenizer(output.toString());
 
         while (st.hasMoreTokens()) {

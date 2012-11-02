@@ -19,18 +19,16 @@ import JSONParser.JSONObject;
 public class DBClassify {
 
 	//default account key to use 
-	private static String ACCOUNTKEY = "5+LYA3sb/FaaLPEiAxQyzc884SBOo7c3284SSItRwZI=";
+	private static String ACCOUNTKEY = "67o8I/cEs9YvBBHN2D25/1U3CUnSiXA746DnSts1d0I=";
 
 	//default precision and query values
 	private double spec_thres;
 	private double cov_thres;
 	private String host;
 	private String bingUrl;
-	private String classification;
+	private ArrayList<String> classification;
 	private Node root; 
-	private HashMap<String, double[]> wordFreq;
 	private HashMap<String, Node> nodes;
-	BufferedWriter out;
 
 	/**
 	 * Main method that retrieves the documents and starts relevance feedback for further improvement
@@ -38,7 +36,7 @@ public class DBClassify {
 	 */
 	public static void main(String[] args) {
 
-		double spec_thres = 0.6;
+		double spec_thres = 0.06;
 		double cov_thres = 100; 
 		String host = "fifa.com";
 
@@ -64,24 +62,18 @@ public class DBClassify {
 	public DBClassify(double spec_thres, double cov_thres, String host) {
 		this.spec_thres = spec_thres;
 		this.cov_thres = cov_thres;
-		this.wordFreq = new HashMap<String, double[]>();
 		this.nodes = new HashMap<String, Node>();
+		this.classification = new ArrayList<String>();
 		this.host = host;
 		//this.bingUrl = "https://api.datamarket.azure.com/Data.ashx/Bing/SearchWeb/v1/Web?Query=%27site%3a"+host+"%20"+query+"%27&$top=10&$format=JSON";
 
-		//initialize writing output to transcript.text, with appending set to true.
-		try {
-			out = new BufferedWriter(new FileWriter("transcript.txt", true));
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
 		createCategories();
 		createQueryList();
 	}
 
 	private void createCategories() {
 
-		root = new Node(0.0, 0, "Root");
+		root = new Node(1.0, 0, "Root");
 		Node computers = new Node(0.0, 0, "Computers");
 		Node hardware = new Node(0.0, 0, "Hardware");
 		Node programming = new Node(0.0, 0, "Programming");
@@ -146,9 +138,33 @@ public class DBClassify {
 
 	public void startQuery() {
 		System.out.println("Classifying... ");
-		String classification = classify(root);		
+		String dbclassification = classify(root);	
+
+		System.out.println();
 		System.out.println("Classification: ");
-		System.out.println(classification);
+
+		HashSet<String> allClassification = new HashSet<String>();
+
+		String result = "";
+		for(int i = 0; i < classification.size(); i++) {
+			if(classification.get(i).equals("Root")) {
+				if(!result.equals(""))
+					System.out.println(result);
+				result = "Root";
+			}
+			else result += "/" + classification.get(i);	
+		}
+
+		if(!result.equals(""))
+			System.out.println(result);
+
+		System.out.println();
+
+		for(String s : classification)
+			allClassification.add(s);
+
+		System.out.println("Extracting topic content summaries... ");
+		processDocs(allClassification);
 	}
 
 	/**
@@ -163,39 +179,47 @@ public class DBClassify {
 
 	public String classify(Node curCategory) {
 		String Result = "";
-		if(curCategory.children.size() < 1)
+		if(curCategory.children.size() < 1) {
+			classification.add(curCategory.getName());
 			return curCategory.getName();
-		
+		}
+
 		int totalDocs = 0;
 		for(Node n : curCategory.children) {
 			int coverage = 0; 
 			for(String s : n.getProbe()) {
-				int docs = retrieveResults(formatQuery(s));
+				int docs = retrieveResults(formatQuery(s), n);
 				totalDocs += docs;
 				coverage += docs;
 			}
 			n.setCov(coverage);
 		}
-		
+
 		for(Node n : curCategory.children) { 
-			double specificity = curCategory.getSpec() * n.getCov() * 1.0 /totalDocs;
+			double specificity = curCategory.getSpec() * n.getCov() * 1.0 / totalDocs;
 			n.setSpec(specificity);
 		}
-		
+
 		printHeader(curCategory);
+
 		for(Node n : curCategory.children) {
-			if(n.getSpec() >= spec_thres && n.getCov() >= cov_thres)
+			if(n.getSpec() >= spec_thres && n.getCov() >= cov_thres) {
+				classification.add(curCategory.getName());
 				Result += curCategory.getName() + "/" + classify(n);
+			}
 		}		
-		
-		if (Result.equals("")) return curCategory.getName();
+
+		if (Result.equals("")) {
+			classification.add(curCategory.getName());
+			return curCategory.getName();
+		}
 		else return Result; 
 	}
 
 	/**
 	 * Query the bing API for retrieving top most documents for current query. 
 	 */
-	public int retrieveResults(String query) {
+	public int retrieveResults(String query, Node n) {
 		int numberOfMatches = 0; 
 
 		try {
@@ -220,8 +244,10 @@ public class DBClassify {
 			JSONObject jo = new JSONObject(json);	
 			jo = jo.getJSONObject("d");
 			JSONArray ja = jo.getJSONArray("results");
+			n.addTopDocs(getResults(ja));
+			//	System.out.println("Query : " + query);
 			JSONObject resultObject = ja.getJSONObject(0);
-			String hitsString= resultObject.get("WebTotal").toString();
+			String hitsString = resultObject.get("WebTotal").toString();
 			numberOfMatches = java.lang.Integer.parseInt(hitsString);
 
 		} catch (Exception e) {
@@ -231,47 +257,122 @@ public class DBClassify {
 		return numberOfMatches;
 	}
 
-	public void writeResults(){
-		try {
-			for(String word : wordFreq.keySet()) {			
-				out.write(word + "#" + wordFreq.get(word)[0] + "#" + wordFreq.get(word)[1]);
-			}
-			out.close();
-
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} 
-	}
-
 	/**
 	 * For each round, print the results, ask user for input, output the results to transcript file.
 	 * @param jo The result object retrieved from BingAPI. 
 	 */
-	public void printResults(JSONObject jo) {
-		try {
-			jo = jo.getJSONObject("d");
-			JSONArray ja = jo.getJSONArray("results");
-			
-			System.out.println("Extracting topic content summaries... ");
-			System.out.println("Creating Content Summaries for:" + classification + "... ");
-			System.out.println(" ");
-			//System.out.println(output);
+	public ArrayList<String> getResults(JSONArray ja) {
+		ArrayList<String> topLinks = new ArrayList<String>();
+		try {		
 
-			for (int i = 1; i <= ja.length(); i++)
-			{
-				System.out.println("Getting Page: ");
-				JSONObject resultObject = ja.getJSONObject(i-1);
-				System.out.println(resultObject.get("Url"));
-				System.out.println();
+			JSONObject result = ja.getJSONObject(0);
+			JSONArray resultObject = result.getJSONArray("Web");
+
+			int valid = 0; 
+			for (int i = 0; i < resultObject.length(); i++) {
+				if(valid > 3)
+					continue;
+
+				String url = resultObject.getJSONObject(i).get("Url").toString();
+				topLinks.add(url);
+				valid++;
 			}	
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
+
+		return topLinks;
+	}
+
+
+	public ArrayList<ArrayList<String>> buildDocList(String category) {
+
+		ArrayList<ArrayList<String>> queryDocs = new ArrayList<ArrayList<String>>();
+		Node curr = nodes.get(category);
+		if(curr != null) {
+			for(Node n : curr.children) {
+				for(ArrayList<String> cases : n.getTopDocs()) {
+					queryDocs.add(cases);
+				}
+			}
+		}
+
+		return queryDocs;
+	}
+
+	public void processDocs(HashSet<String> classification) {
+
+		HashMap<String, ArrayList<ArrayList<String>>> allDocs = new HashMap<String, ArrayList<ArrayList<String>>>(); 
+
+		for(String category : classification) {
+
+			ArrayList<ArrayList<String>> categoryList = buildDocList(category);
+			Node currNode = nodes.get(category);
+
+			for(Node n : currNode.children) {
+				ArrayList<ArrayList<String>> subCategoryList = new ArrayList<ArrayList<String>>();
+				if(classification.contains(n.getName())) subCategoryList = buildDocList(n.getName());  
+				if(null != subCategoryList) {
+					for(ArrayList<String> docs : subCategoryList) {
+						categoryList.add(docs);
+					}
+				}
+			}
+
+			allDocs.put(category, categoryList);
+			System.out.println(category + " : " + categoryList.size());
+		}
+
+		for(String s : allDocs.keySet()) {
+			HashSet<String> uniqueDocs = new HashSet<String>();
+			HashMap<String, Integer> wordFreq = new HashMap<String, Integer>();
+			System.out.println("Creating Content Summary for: " + s);
+
+			int count = 1; 
+			for(ArrayList<String> topDocsByQuery : allDocs.get(s)) {
+				System.out.println(count + "/" + allDocs.get(s).size());
+				for(String url : topDocsByQuery) {
+					if(!uniqueDocs.contains(url)) {
+						System.out.println("Getting Page: " + url);
+						Set<String> currentTerms = getWordsLynx.runLynx(url);
+						for(String term : currentTerms) {
+							Integer freq = wordFreq.get(term);
+							if(freq == null) wordFreq.put(term, 1);
+							else wordFreq.put(term, freq + 1);
+						}
+						System.out.println();
+						System.out.println();
+						uniqueDocs.add(url);
+					}
+				}
+				count++;
+			}
+			writeResults(wordFreq, s);
+		}
+	}
+
+	public void writeResults(HashMap<String, Integer> wordFreq, String query){
+		if(wordFreq.size() > 0) {
+
+			List<String> sortedKeys=new ArrayList<String>(wordFreq.keySet());
+			Collections.sort(sortedKeys);
+
+			try {
+				BufferedWriter out = new BufferedWriter(new FileWriter(query + "-" + host + ".txt", false));
+				for(String word : sortedKeys) {	
+					double freq = wordFreq.get(word) * 1.0;
+					out.write(word + "#" + freq + "\n");
+				}
+				out.close();
+
+			} catch (IOException e) {
+				e.printStackTrace();
+			} 
+		}
 	}
 
 	/**
-	 * Fortmat the query to put in the URL, replace " " with %20. 
+	 * Fortmat the query to put in the URL, replace " " with +. 
 	 * @param query2 original query 
 	 * @return formatted query 
 	 */
